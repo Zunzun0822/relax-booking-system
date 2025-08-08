@@ -1,11 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Users, Phone, User, Plus, Trash2, Edit3 } from 'lucide-react';
+import { Calendar, Clock, Users, Phone, User, Plus, Trash2, Edit3, CheckCircle } from 'lucide-react';
 
 const RestaurantBookingSystem = () => {
   const [bookings, setBookings] = useState([]);
   const [isAddingBooking, setIsAddingBooking] = useState(false);
   const [editingBooking, setEditingBooking] = useState(null);
-  const [currentDate, setCurrentDate] = useState(new Date().toISOString().split('T')[0]);
+  // 修改1: 預設日期設為當日日期 - 使用台灣時區
+  const getTodayDate = () => {
+    const today = new Date();
+    // 確保使用台灣時區
+    today.setHours(today.getHours() + 8);
+    return today.toISOString().split('T')[0];
+  };
+
+  // 檢查是否為周三（公休日）
+  const isWednesday = (dateString) => {
+    const date = new Date(dateString + 'T00:00:00');
+    return date.getDay() === 3; // 0=周日, 1=周一, ..., 3=周三
+  };
+  const [currentDate, setCurrentDate] = useState(getTodayDate());
 
   // 桌位配置
   const tables = {
@@ -52,7 +65,7 @@ const RestaurantBookingSystem = () => {
     customerName: '',
     phone: '',
     partySize: '',
-    date: new Date().toISOString().split('T')[0],
+    date: getTodayDate(), // 修改1: 預設為當日日期 - 使用台灣時區
     time: '',
     tableIds: [], // 改為陣列支援多桌
     notes: ''
@@ -64,7 +77,8 @@ const RestaurantBookingSystem = () => {
   const getTableBookings = (tableId, date) => {
     return bookings.filter(booking => 
       (booking.tableIds || [booking.tableId]).includes(tableId) && 
-      booking.date === date
+      booking.date === date &&
+      booking.status !== 'finished' // 修改2: 排除已結束的訂位
     ).sort((a, b) => a.time.localeCompare(b.time));
   };
 
@@ -104,6 +118,17 @@ const RestaurantBookingSystem = () => {
         return (newStartTime < bookingEndTime && newEndTime > bookingStartTime);
       });
     });
+  };
+
+  // 修改2: 新增手動結束用餐功能
+  const handleFinishDining = (bookingId) => {
+    if (window.confirm('確定要結束此桌的用餐嗎？')) {
+      setBookings(bookings.map(booking => 
+        booking.id === bookingId 
+          ? { ...booking, status: 'finished', finishedAt: new Date().toISOString() }
+          : booking
+      ));
+    }
   };
 
   // 當人數改變時，清空桌位選擇
@@ -152,6 +177,31 @@ const RestaurantBookingSystem = () => {
       return;
     }
 
+    // 檢查是否選擇過去的日期
+    if (formData.date < getTodayDate()) {
+      alert('不能預訂過去的日期，請選擇今天或未來的日期');
+      return;
+    }
+
+    // 檢查是否選擇周三（公休日）
+    if (isWednesday(formData.date)) {
+      alert('本餐廳每週三公休，無法接受訂位，請選擇其他日期');
+      return;
+    }
+
+    // 如果是今天的預訂，檢查時間是否已過
+    if (formData.date === getTodayDate()) {
+      const now = new Date();
+      const [hours, minutes] = formData.time.split(':').map(Number);
+      const bookingTime = new Date();
+      bookingTime.setHours(hours, minutes, 0, 0);
+      
+      if (bookingTime <= now) {
+        alert('不能預訂已過去的時間，請選擇未來的時間');
+        return;
+      }
+    }
+
     // 檢查容量警告並詢問確認
     const warning = getCapacityWarning();
     if (warning && warning.type === 'warning') {
@@ -176,7 +226,8 @@ const RestaurantBookingSystem = () => {
       tableNames: tableNames,
       // 為了向下相容，保留單一 tableId
       tableId: finalTableIds[0],
-      tableName: tableNames.join(' + ')
+      tableName: tableNames.join(' + '),
+      status: editingBooking ? editingBooking.status : 'active' // 修改2: 新增狀態管理
     };
 
     if (editingBooking) {
@@ -188,12 +239,12 @@ const RestaurantBookingSystem = () => {
       setBookings([...bookings, bookingData]);
     }
 
-    // 重置表單
+    // 重置表單 - 修改1: 重置時保持當日日期
     setFormData({
       customerName: '',
       phone: '',
       partySize: '',
-      date: currentDate,
+      date: getTodayDate(), // 保持當日日期 - 使用台灣時區
       time: '',
       tableIds: [],
       notes: ''
@@ -223,7 +274,7 @@ const RestaurantBookingSystem = () => {
       customerName: '',
       phone: '',
       partySize: '',
-      date: currentDate,
+      date: getTodayDate(), // 修改1: 取消時也保持當日日期 - 使用台灣時區
       time: '',
       tableIds: [],
       notes: ''
@@ -233,19 +284,21 @@ const RestaurantBookingSystem = () => {
     setSuggestedCombination(null);
   };
 
-  // 獲取當日訂位
+  // 獲取當日訂位 - 修改2: 區分進行中和已結束的訂位
   const todayBookings = bookings
     .filter(booking => booking.date === currentDate)
     .sort((a, b) => a.time.localeCompare(b.time));
+
+  const activeBookings = todayBookings.filter(booking => booking.status !== 'finished');
+  const finishedBookings = todayBookings.filter(booking => booking.status === 'finished');
 
   return (
     <div className="max-w-6xl mx-auto p-6 bg-gray-50 min-h-screen">
       <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
         <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center">
           <Calendar className="mr-3 text-blue-600" />
-          餐廳訂位管理系統
+          輕鬆點訂位管理系統
         </h1>
-        <p className="text-gray-600">數位化訂位管理，提升餐廳營運效率</p>
       </div>
 
       {/* 日期選擇和快速操作 */}
@@ -262,6 +315,13 @@ const RestaurantBookingSystem = () => {
                 className="border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </label>
+            {/* 修改1: 新增快速回到今日按鈕 */}
+            <button
+              onClick={() => setCurrentDate(getTodayDate())}
+              className="text-blue-600 hover:text-blue-800 text-sm underline"
+            >
+              回到今日
+            </button>
           </div>
           
           <button
@@ -277,6 +337,11 @@ const RestaurantBookingSystem = () => {
       {/* 桌位狀態總覽 */}
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
         <h2 className="text-xl font-semibold mb-4 text-gray-800">桌位狀態總覽 - {currentDate}</h2>
+        {isWednesday(currentDate) && (
+          <div className="mb-4 text-center text-red-600 bg-red-50 p-3 rounded-md border border-red-200">
+            🚫 本餐廳每週三公休，今日不提供服務
+          </div>
+        )}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {allTables.map(table => {
             const tableBookings = getTableBookings(table.id, currentDate);
@@ -316,7 +381,7 @@ const RestaurantBookingSystem = () => {
               {editingBooking ? '編輯訂位' : '新增訂位'}
             </h2>
             
-            <div className="space-y-4">
+                        <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -373,10 +438,16 @@ const RestaurantBookingSystem = () => {
                   <input
                     type="date"
                     value={formData.date}
+                    min={getTodayDate()} // 限制不能選擇過去的日期
                     onChange={(e) => setFormData({...formData, date: e.target.value})}
                     className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     required
                   />
+                  {formData.date && isWednesday(formData.date) && (
+                    <div className="mt-1 text-sm text-red-600 bg-red-50 p-2 rounded">
+                      ⚠️ 本餐廳每週三公休，請選擇其他日期
+                    </div>
+                  )}
                 </div>
                 
                 <div>
@@ -496,73 +567,146 @@ const RestaurantBookingSystem = () => {
               <p>今日尚無訂位</p>
             </div>
           ) : (
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {todayBookings.map(booking => (
-                <div key={booking.id} className="border rounded-lg p-4 bg-gray-50">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-2">
-                        <Clock className="text-blue-600" size={16} />
-                        <span className="font-medium text-lg">{booking.time}</span>
-                        <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-                          {booking.tableName}
-                        </span>
-                        {(booking.tableIds ? booking.tableIds.length > 1 : false) && (
-                          <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
-                            多桌組合
-                          </span>
-                        )}
+            <div className="space-y-4">
+              {/* 修改2: 進行中的訂位 */}
+              {activeBookings.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-medium text-gray-800 mb-3">進行中訂位</h3>
+                  <div className="space-y-3 max-h-80 overflow-y-auto">
+                    {activeBookings.map(booking => (
+                      <div key={booking.id} className="border rounded-lg p-4 bg-gray-50">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <Clock className="text-blue-600" size={16} />
+                              <span className="font-medium text-lg">{booking.time}</span>
+                              <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
+                                {booking.tableName}
+                              </span>
+                              {(booking.tableIds ? booking.tableIds.length > 1 : false) && (
+                                <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                                  多桌組合
+                                </span>
+                              )}
+                              <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">
+                                用餐中
+                              </span>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-600">
+                              <div className="flex items-center">
+                                <User size={14} className="mr-2" />
+                                {booking.customerName}
+                              </div>
+                              <div className="flex items-center">
+                                <Phone size={14} className="mr-2" />
+                                {booking.phone}
+                              </div>
+                              <div className="flex items-center">
+                                <Users size={14} className="mr-2" />
+                                {booking.partySize}人
+                              </div>
+                              <div className="text-green-600">
+                                預計{(() => {
+                                  const [hours, minutes] = booking.time.split(':').map(Number);
+                                  const endTime = new Date();
+                                  endTime.setHours(hours, minutes + 90, 0, 0);
+                                  return `${endTime.getHours().toString().padStart(2, '0')}:${endTime.getMinutes().toString().padStart(2, '0')}`;
+                                })()} 結束
+                              </div>
+                            </div>
+                            
+                            {booking.notes && (
+                              <div className="mt-2 text-sm text-gray-500 bg-yellow-50 p-2 rounded">
+                                備註: {booking.notes}
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="flex space-x-2 ml-4">
+                            {/* 修改2: 新增結束用餐按鈕 */}
+                            <button
+                              onClick={() => handleFinishDining(booking.id)}
+                              className="text-green-600 hover:text-green-800 p-1"
+                              title="結束用餐"
+                            >
+                              <CheckCircle size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleEdit(booking)}
+                              className="text-blue-600 hover:text-blue-800 p-1"
+                              title="編輯"
+                            >
+                              <Edit3 size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(booking.id)}
+                              className="text-red-600 hover:text-red-800 p-1"
+                              title="刪除"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-600">
-                        <div className="flex items-center">
-                          <User size={14} className="mr-2" />
-                          {booking.customerName}
-                        </div>
-                        <div className="flex items-center">
-                          <Phone size={14} className="mr-2" />
-                          {booking.phone}
-                        </div>
-                        <div className="flex items-center">
-                          <Users size={14} className="mr-2" />
-                          {booking.partySize}人
-                        </div>
-                        <div className="text-green-600">
-                          預計{(() => {
-                            const [hours, minutes] = booking.time.split(':').map(Number);
-                            const endTime = new Date();
-                            endTime.setHours(hours, minutes + 90, 0, 0);
-                            return `${endTime.getHours().toString().padStart(2, '0')}:${endTime.getMinutes().toString().padStart(2, '0')}`;
-                          })()} 結束
-                        </div>
-                      </div>
-                      
-                      {booking.notes && (
-                        <div className="mt-2 text-sm text-gray-500 bg-yellow-50 p-2 rounded">
-                          備註: {booking.notes}
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div className="flex space-x-2 ml-4">
-                      <button
-                        onClick={() => handleEdit(booking)}
-                        className="text-blue-600 hover:text-blue-800 p-1"
-                        title="編輯"
-                      >
-                        <Edit3 size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(booking.id)}
-                        className="text-red-600 hover:text-red-800 p-1"
-                        title="刪除"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                    ))}
                   </div>
                 </div>
-              ))}
+              )}
+
+              {/* 修改2: 已完成的訂位 */}
+              {finishedBookings.length > 0 && (
+                <div>
+                  <h3 className="text-lg font-medium text-gray-800 mb-3">已完成訂位</h3>
+                  <div className="space-y-3 max-h-60 overflow-y-auto">
+                    {finishedBookings.map(booking => (
+                      <div key={booking.id} className="border rounded-lg p-4 bg-gray-100 opacity-75">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center space-x-2 mb-2">
+                              <Clock className="text-gray-500" size={16} />
+                              <span className="font-medium text-lg text-gray-600">{booking.time}</span>
+                              <span className="bg-gray-200 text-gray-600 px-2 py-1 rounded text-sm">
+                                {booking.tableName}
+                              </span>
+                              <span className="bg-gray-200 text-gray-600 px-2 py-1 rounded text-xs">
+                                已完成
+                              </span>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-500">
+                              <div className="flex items-center">
+                                <User size={14} className="mr-2" />
+                                {booking.customerName}
+                              </div>
+                              <div className="flex items-center">
+                                <Users size={14} className="mr-2" />
+                                {booking.partySize}人
+                              </div>
+                            </div>
+                            
+                            {booking.finishedAt && (
+                              <div className="mt-2 text-xs text-gray-500">
+                                完成時間: {new Date(booking.finishedAt).toLocaleTimeString('zh-TW')}
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="flex space-x-2 ml-4">
+                            <button
+                              onClick={() => handleDelete(booking.id)}
+                              className="text-red-600 hover:text-red-800 p-1"
+                              title="刪除"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
